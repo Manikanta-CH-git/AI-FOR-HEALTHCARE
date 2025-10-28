@@ -51,9 +51,9 @@ for _, row in df.iterrows():
             "Name": row["name"],
             "Pain": row.get("pain_level", 0),
             "Steps": row.get("steps_walked", 0),
-            "Medicine": row.get("medicine_taken", "No"),  # Patient input
+            "Medicine": row.get("medicine_taken", "No"),
             "Notes": row.get("notes", ""),
-            "Doctor_Notes": row.get("doctor_notes", ""),  # Separate field
+            "Doctor_Notes": row.get("doctor_notes", ""),
             "Timestamp": row.get("timestamp", ""),
             "AI_Risk_Score": ai_output["risk_score"],
             "AI_Risk_Level": ai_output["risk_level"],
@@ -65,42 +65,54 @@ for _, row in df.iterrows():
 df_ai = pd.DataFrame(ai_results)
 df_ai = df_ai.sort_values(by="AI_Risk_Score", ascending=False)
 
+st.subheader("📋 Patient Status Overview")
+
 # -----------------------------
-# Display AI Cards per Patient
+# Display AI Cards and Update Option
 # -----------------------------
 for _, row in df_ai.iterrows():
-    color = "#90EE90"
+    color = "#90EE90"  # Low Risk
     if row["AI_Risk_Level"] == "High":
         color = "#FF6347"
     elif row["AI_Risk_Level"] == "Moderate":
         color = "#FFA500"
 
-    st.markdown(
-        f"""
-        <div style="
-            background-color: {color};
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-        ">
-            <h4>{row['Name']} — <b>{row['AI_Risk_Level']} Risk ({row['AI_Risk_Score']})</b></h4>
-            <p><b>Pain:</b> {row['Pain']} | <b>Steps:</b> {row['Steps']} | <b>Medicine:</b> {row['Medicine']}</p>
-            <p><b>AI Recommendation:</b> {row['AI_Recommendation']}</p>
-            <p><b>Patient Notes:</b> {row['Notes']}</p>
-            <p><b>Doctor Notes / Prescription:</b> {row['Doctor_Notes']}</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    with st.container():
+        st.markdown(
+            f"""
+            <div style="
+                background-color: {color};
+                padding: 15px;
+                border-radius: 10px;
+                margin-bottom: 10px;
+            ">
+                <h4>{row['Name']} — <b>{row['AI_Risk_Level']} Risk ({row['AI_Risk_Score']})</b></h4>
+                <p><b>Pain:</b> {row['Pain']} | <b>Steps:</b> {row['Steps']} | <b>Medicine:</b> {row['Medicine']}</p>
+                <p><b>AI Recommendation:</b> {row['AI_Risk_Recommendation'] if 'AI_Risk_Recommendation' in row else row['AI_Recommendation']}</p>
+                <p><b>Patient Notes:</b> {row['Notes']}</p>
+                <p><b>Doctor Notes / Prescription:</b> {row['Doctor_Notes']}</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-    # Doctor update field
-    st.markdown(f"### ✏ Update Doctor Notes for {row['Name']}")
-    new_doctor_notes = st.text_area(f"Doctor Notes / Prescription (current: {row['Doctor_Notes']})", key=f"docnotes_{row['Name']}")
+        # Doctor input field
+        new_doctor_notes = st.text_area(
+            f"✏ Write/Update Prescription for {row['Name']}",
+            value=row["Doctor_Notes"],
+            key=f"doc_notes_{row['Timestamp']}"
+        )
 
-    if st.button(f"Update {row['Name']}", key=f"btn_{row['Name']}"):
-        doc_id = row["Name"] + "_" + row["Timestamp"]
-        # ✅ Update only doctor_notes, keep patient data intact
-        db.collection("patients").document(doc_id).set({
-            "doctor_notes": new_doctor_notes if new_doctor_notes else row["Doctor_Notes"]
-        }, merge=True)
-        st.success(f"Doctor notes for {row['Name']} updated successfully!")
+        # Update Firestore
+        if st.button(f"✅ Save Prescription for {row['Name']}", key=f"save_{row['Timestamp']}"):
+            doc_ref = db.collection("patients").where("timestamp", "==", row["Timestamp"]).stream()
+            found = False
+
+            for doc in doc_ref:
+                doc.reference.update({"doctor_notes": new_doctor_notes})
+                found = True
+
+            if found:
+                st.success(f"✅ Prescription updated for {row['Name']}")
+            else:
+                st.error(f"❌ Could not find matching timestamp record!")
